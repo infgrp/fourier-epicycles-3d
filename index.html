@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D 푸리에 에피사이클</title>
+<style>
+  :root {
+    --bg: #05060f; --panel: rgba(14, 18, 40, 0.72); --line: rgba(160, 180, 255, 0.18);
+    --ink: #e9ecff; --dim: #9aa3c7; --gold: #ffc94a; --cyan: #5ee7ff; --pink: #ff6fb5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; outline: none; touch-action: none; }
+  .glass { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  #panel { top: 16px; left: 16px; width: 290px; padding: 16px 16px 12px; max-height: calc(100% - 150px); overflow: auto; }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: -0.3px; }
+  h1 span { color: var(--gold); }
+  .sub { color: var(--dim); font-size: 12.5px; line-height: 1.55; margin: 0 0 12px; }
+  label.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin: 7px 0; }
+  select, input[type=text] { background: rgba(255,255,255,0.06); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 13px; width: 150px; }
+  select option { background: #141a36; }
+  input[type=range] { width: 150px; accent-color: var(--gold); }
+  .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-top: 8px; font-size: 12.5px; color: var(--dim); }
+  .checks label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  input[type=checkbox] { accent-color: var(--cyan); }
+  #upRow { display: none; }
+  #textRow { display: none; }
+  .hint { font-size: 11.5px; color: var(--dim); margin-top: 10px; line-height: 1.5; border-top: 1px solid var(--line); padding-top: 9px; }
+  .hint b { color: var(--ink); font-weight: 600; }
+  #bar { left: 50%; transform: translateX(-50%); bottom: 16px; width: min(880px, calc(100% - 32px)); padding: 12px 18px; }
+  #bar .top { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--dim); }
+  #bar .top b { color: var(--ink); font-size: 15px; }
+  #nval { color: var(--gold) !important; font-size: 22px !important; }
+  #bar .ctl { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  #nslider { flex: 1; width: auto; }
+  button { background: rgba(255, 201, 74, 0.14); color: var(--gold); border: 1px solid rgba(255, 201, 74, 0.45);
+    border-radius: 9px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  button:hover { background: rgba(255, 201, 74, 0.25); }
+  button.ghost { background: rgba(255,255,255,0.05); color: var(--ink); border-color: var(--line); }
+  button.rec { background: rgba(255, 107, 107, 0.12); color: #ff8a8a; border-color: rgba(255, 107, 107, 0.5); }
+  button.rec:hover { background: rgba(255, 107, 107, 0.24); }
+  button.rec.on { background: #e5484d; color: #fff; border-color: #ff8a8a; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { box-shadow: 0 0 0 4px rgba(229, 72, 77, 0.25); } }
+  .recbox { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 9px; }
+  .recbox .btns { display: flex; gap: 8px; margin-top: 8px; }
+  .recbox select { width: 120px; }
+  #spec { right: 16px; top: 16px; padding: 10px 12px 8px; width: 300px; }
+  #spec .t { font-size: 12px; color: var(--dim); margin-bottom: 6px; display: flex; justify-content: space-between; }
+  #specCanvas { width: 276px; height: 110px; display: block; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 14px; pointer-events: none; }
+  @media (max-width: 760px) {
+    #panel { width: calc(100% - 32px); max-height: 38%; }
+    #spec { display: none; }
+    #bar { bottom: 8px; }
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.0/babylon.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="loading">불러오는 중…</div>
+
+<div id="panel" class="glass">
+  <h1>3D 푸리에 <span>에피사이클</span></h1>
+  <p class="sub">회전하는 원과 구를 끝에서 끝으로 이어 붙이면, 마지막 점이 3차원 폐곡선을 그린다. 원이 많을수록 모양이 정교해진다.</p>
+  <label class="row">모양
+    <select id="shape">
+      <option value="trefoil">트레포일 매듭</option>
+      <option value="torusknot">토러스 매듭 (2, 5)</option>
+      <option value="tennis">테니스공 이음매</option>
+      <option value="star">3D 별</option>
+      <option value="text">글자</option>
+      <option value="person">인물 실루엣</option>
+      <option value="image">이미지 윤곽선 (업로드)</option>
+    </select>
+  </label>
+  <label class="row" id="textRow">글자 <input type="text" id="textIn" value="π" maxlength="6"></label>
+  <label class="row" id="upRow">이미지 <input type="file" id="fileIn" accept="image/*" style="width:150px;font-size:11px"></label>
+  <label class="row" id="wrapRow">3D로 감기
+    <select id="wrap">
+      <option value="sphere">구면</option>
+      <option value="cylinder">원통</option>
+      <option value="wave">물결 평면</option>
+    </select>
+  </label>
+  <label class="row">한 바퀴 시간 <input type="range" id="speed" min="4" max="40" value="14"></label>
+  <div class="checks">
+    <label><input type="checkbox" id="cRings" checked>원</label>
+    <label><input type="checkbox" id="cShells" checked>궤도 구</label>
+    <label><input type="checkbox" id="cApprox" checked>근사 곡선</label>
+    <label><input type="checkbox" id="cTarget">원래 곡선</label>
+    <label><input type="checkbox" id="cRotate" checked>자동 회전</label>
+    <label id="invRow" style="display:none"><input type="checkbox" id="cInvert">밝기 반전</label>
+  </div>
+  <div class="recbox">
+    <label class="row">녹화 해상도
+      <select id="recRes">
+        <option value="screen">화면 그대로</option>
+        <option value="1080" selected>1080p</option>
+        <option value="4k">4K</option>
+      </select>
+    </label>
+    <div class="checks" style="margin-top:2px"><label><input type="checkbox" id="cRecHud" checked>녹화에 정보 표시</label></div>
+    <div class="btns"><button id="recAuto" class="rec">🎬 과정 녹화 (N = 1 → 끝)</button></div>
+  </div>
+  <div class="hint">
+    각 주파수 <b>k</b>의 성분 <b>A<sub>k</sub> cos kt + B<sub>k</sub> sin kt</b>는 공간에서 기울어진 타원이다.
+    타원은 같은 평면에서 반대로 도는 두 원(<b>+k</b>, <b>−k</b>)의 합이므로, 원을 반지름이 큰 것부터 N개 쓴다.
+    드래그로 돌리고 휠로 확대한다.
+  </div>
+</div>
+
+<div id="spec" class="glass">
+  <div class="t"><span>원의 반지름 (큰 순서, 로그 눈금)</span><span id="specN"></span></div>
+  <canvas id="specCanvas" width="552" height="220"></canvas>
+</div>
+
+<div id="bar" class="glass">
+  <div class="top">
+    <span>원의 개수 N = <b id="nval">1</b></span>
+    <span>최고 주파수 |k| = <b id="kval">1</b></span>
+    <span>오차 <b id="err">–</b></span>
+    <span id="mode" style="margin-left:auto"></span>
+  </div>
+  <div class="ctl">
+    <button id="auto">▶ 자동으로 늘리기</button>
+    <input type="range" id="nslider" min="1" max="200" value="1">
+    <button id="pause" class="ghost">⏸ 멈춤</button>
+    <button id="rec" class="rec" title="R 키">● 녹화</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ───────────────────────── 0. 설정 ───────────────────────── */
+const Q = new URLSearchParams(location.search);
+const M = 1024;            // 곡선 표본 수 (DFT 길이)
+const KMAX = 300;          // 쓰는 최고 주파수 → 원은 최대 600개
+const APPROX = 1200;       // 근사 곡선 표본 수
+const TRACE_FRAC = 0.82;   // 밝게 남는 자취 (한 바퀴의 비율)
+const RING_SEG = 64;       // 원 하나의 선분 수
+const RING_SHOW = 160;     // 그리는 원의 최대 개수 (나머지는 너무 작다)
+const SHELLS = 5;          // 궤도 구를 보여 줄 큰 원 개수
+const SIZE = 10;           // 곡선 크기 (최대 반지름)
+const TAU = Math.PI * 2;
+
+/* ───────────────────────── 1. 목표 곡선 ───────────────────────── */
+function param(fn) {
+  const pts = [];
+  for (let i = 0; i < M; i++) pts.push(fn(TAU * i / M));
+  return pts;
+}
+const SHAPES = {
+  trefoil: () => param(t => [Math.sin(t) + 2 * Math.sin(2 * t), Math.cos(t) - 2 * Math.cos(2 * t), -Math.sin(3 * t)]),
+  torusknot: () => param(t => {
+    const p = 2, q = 5, R = 2, r = 0.85, rr = R + r * Math.cos(q * t);
+    return [rr * Math.cos(p * t), r * Math.sin(q * t) * 1.3, rr * Math.sin(p * t)];
+  }),
+  tennis: () => param(t => {
+    const a = 0.68, b = 0.32;
+    return [a * Math.cos(t) + b * Math.cos(3 * t), 2 * Math.sqrt(a * b) * Math.sin(2 * t), a * Math.sin(t) - b * Math.sin(3 * t)];
+  }),
+  star: () => {
+    const corners = [];
+    for (let i = 0; i < 10; i++) {
+      const a = Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.42 : 1;
+      corners.push([r * Math.cos(a), r * Math.sin(a), i % 2 ? -0.35 : 0.35]);
+    }
+    return resample(corners.map(p => p), M);
+  },
+};
+
+function resample(pts, n) {
+  // 닫힌 꺾은선을 호의 길이에 따라 n 개로 고르게 다시 뽑는다
+  const L = [0];
+  for (let i = 1; i <= pts.length; i++) {
+    const a = pts[i - 1], b = pts[i % pts.length];
+    L.push(L[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]));
+  }
+  const total = L[L.length - 1], out = [];
+  let j = 0;
+  for (let i = 0; i < n; i++) {
+    const s = total * i / n;
+    while (L[j + 1] < s) j++;
+    const a = pts[j], b = pts[(j + 1) % pts.length], f = (s - L[j]) / Math.max(1e-12, L[j + 1] - L[j]);
+    out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]);
+  }
+  return out;
+}
+
+function normalize(pts) {
+  const c = [0, 0, 0];
+  for (const p of pts) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; }
+  c[0] /= pts.length; c[1] /= pts.length; c[2] /= pts.length;
+  let r = 0;
+  for (const p of pts) r = Math.max(r, Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]));
+  return pts.map(p => [(p[0] - c[0]) / r * SIZE, (p[1] - c[1]) / r * SIZE, (p[2] - c[2]) / r * SIZE]);
+}
+
+/* ── 2D 그림(글자·실루엣·이미지)의 윤곽선 → 하나의 닫힌 경로 ── */
+function maskFromCanvas(draw, mode, invert) {
+  const S = 360, cv = document.createElement("canvas");
+  cv.width = cv.height = S;
+  const g = cv.getContext("2d", { willReadFrequently: true });
+  g.clearRect(0, 0, S, S);
+  draw(g, S);
+  const d = g.getImageData(0, 0, S, S).data, m = new Uint8Array(S * S);
+  if (mode === "alpha") {
+    for (let i = 0; i < S * S; i++) m[i] = d[4 * i + 3] > 110 ? 1 : 0;
+  } else {
+    // 흰 바탕에 합성한 밝기 → 오츠 임계값
+    const lum = new Float32Array(S * S), hist = new Array(256).fill(0);
+    for (let i = 0; i < S * S; i++) {
+      const a = d[4 * i + 3] / 255;
+      const v = (0.299 * d[4 * i] + 0.587 * d[4 * i + 1] + 0.114 * d[4 * i + 2]) * a + 255 * (1 - a);
+      lum[i] = v; hist[Math.min(255, v | 0)]++;
+    }
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sB = 0, wB = 0, best = 0, thr = 128;
+    for (let i = 0; i < 256; i++) {
+      wB += hist[i]; if (!wB) continue;
+      const wF = S * S - wB; if (!wF) break;
+      sB += i * hist[i];
+      const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > best) { best = v; thr = i; }
+    }
+    for (let i = 0; i < S * S; i++) m[i] = (lum[i] < thr) !== invert ? 1 : 0;
+  }
+  return { m, S };
+}
+
+function contours({ m, S }) {
+  // 마칭 스퀘어: 테두리를 0 으로 감싼 격자에서 변의 중점을 잇는다
+  const P = S + 2, val = (x, y) => (x < 1 || y < 1 || x > S || y > S) ? 0 : m[(y - 1) * S + (x - 1)];
+  const H = (x, y) => y * P + x, V = (x, y) => P * P + y * P + x;
+  const adj = new Map();
+  const link = (a, b) => {
+    if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []);
+    adj.get(a).push(b); adj.get(b).push(a);
+  };
+  for (let y = 0; y < P - 1; y++) for (let x = 0; x < P - 1; x++) {
+    const c = val(x, y) * 8 + val(x + 1, y) * 4 + val(x + 1, y + 1) * 2 + val(x, y + 1);
+    if (c === 0 || c === 15) continue;
+    const T = H(x, y), R = V(x + 1, y), B = H(x, y + 1), L = V(x, y);
+    const segs = {
+      1: [[L, B]], 2: [[B, R]], 3: [[L, R]], 4: [[T, R]], 5: [[T, R], [L, B]], 6: [[T, B]], 7: [[T, L]],
+      8: [[T, L]], 9: [[T, B]], 10: [[T, L], [B, R]], 11: [[T, R]], 12: [[L, R]], 13: [[B, R]], 14: [[L, B]],
+    }[c];
+    for (const [a, b] of segs) link(a, b);
+  }
+  const xy = k => k >= P * P ? [(k - P * P) % P, Math.floor((k - P * P) / P) + 0.5] : [k % P + 0.5, Math.floor(k / P)];
+  const seen = new Set(), loops = [];
+  for (const start of adj.keys()) {
+    if (seen.has(start)) continue;
+    const loop = []; let prev = -1, cur = start;
+    while (cur !== undefined && !seen.has(cur)) {
+      seen.add(cur); loop.push(xy(cur));
+      const nb = adj.get(cur), nxt = nb[0] !== prev ? nb[0] : nb[1];
+      prev = cur; cur = nxt;
+    }
+    if (loop.length > 24) loops.push(loop);
+  }
+  return loops;
+}
+
+function smooth2(loop, times) {
+  let a = loop;
+  for (let t = 0; t < times; t++) {
+    const n = a.length;
+    a = a.map((p, i) => {
+      const q = a[(i - 1 + n) % n], r = a[(i + 1) % n];
+      return [(q[0] + 2 * p[0] + r[0]) / 4, (q[1] + 2 * p[1] + r[1]) / 4];
+    });
+  }
+  return a;
+}
+
+function joinLoops(loops) {
+  // 큰 윤곽부터, 끝점에서 가장 가까운 윤곽으로 건너가며 하나의 경로로 잇는다
+  loops = loops.map(l => smooth2(l, 3)).sort((a, b) => b.length - a.length).slice(0, 14);
+  const path = [...loops.shift()];
+  while (loops.length) {
+    const end = path[path.length - 1];   // 방금 다 돈 윤곽의 끝점 (= 그 윤곽에 들어온 점)
+    let bi = 0, bj = 0, bd = Infinity;
+    loops.forEach((l, i) => l.forEach((p, j) => {
+      const d = (p[0] - end[0]) ** 2 + (p[1] - end[1]) ** 2;
+      if (d < bd) { bd = d; bi = i; bj = j; }
+    }));
+    const l = loops.splice(bi, 1)[0];
+    path.push(...l.slice(bj), ...l.slice(0, bj + 1));
+  }
+  return path;
+}
+
+function wrap3d(path2, mode) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of path2) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, h = Math.max(x1 - x0, y1 - y0) / 2;
+  const pts = path2.map(([x, y]) => {
+    const u = (x - cx) / h, v = -(y - cy) / h;
+    if (mode === "sphere") {
+      const lon = u * 0.95, lat = v * 0.78;
+      return [Math.cos(lat) * Math.sin(lon), Math.sin(lat), -Math.cos(lat) * Math.cos(lon)];
+    }
+    if (mode === "cylinder") {
+      const a = u * 1.45;
+      return [Math.sin(a), v * 0.95, -Math.cos(a)];
+    }
+    return [u, v, 0.22 * Math.sin(3 * Math.PI * u) * Math.cos(2 * Math.PI * v)];
+  });
+  return resample(pts, M);
+}
+
+let uploadedImage = null;
+function targetFor(shape, wrapMode) {
+  if (SHAPES[shape]) return normalize(SHAPES[shape]());
+  let draw, mode = "alpha";
+  if (shape === "text") {
+    const txt = (document.getElementById("textIn").value || "π").trim() || "π";
+    draw = (g, S) => {
+      g.fillStyle = "#000"; g.textAlign = "center"; g.textBaseline = "middle";
+      let fs = S * 0.8;
+      g.font = `900 ${fs}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", serif`;
+      const w = g.measureText(txt).width;
+      if (w > S * 0.86) { fs *= S * 0.86 / w; g.font = `900 ${fs}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", serif`; }
+      g.fillText(txt, S / 2, S / 2 + fs * 0.04);
+    };
+  } else if (shape === "person") {
+    draw = (g, S) => {
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.font = `${S * 0.82}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+      g.fillText("👤", S / 2, S / 2 + S * 0.04);
+    };
+  } else {
+    if (!uploadedImage) return null;
+    mode = "lum";
+    draw = (g, S) => {
+      const im = uploadedImage, k = Math.min(S * 0.9 / im.width, S * 0.9 / im.height);
+      g.fillStyle = "#fff"; g.fillRect(0, 0, S, S);
+      g.drawImage(im, (S - im.width * k) / 2, (S - im.height * k) / 2, im.width * k, im.height * k);
+    };
+  }
+  const loops = contours(maskFromCanvas(draw, mode, document.getElementById("cInvert").checked));
+  if (!loops.length) return null;
+  return normalize(wrap3d(joinLoops(loops), wrapMode));
+}
+
+/* ───────────────────────── 2. 푸리에 → 원 ─────────────────────────
+   γ(t) = c₀ + Σ_k (A_k cos kt + B_k sin kt)  (A_k, B_k ∈ ℝ³) : 각 항은 평면 (u, v) 위의 타원
+   타원 = 같은 평면에서 +k, −k 로 도는 두 원 → 원 하나 = {r, φ, ω, u, v}                         */
+const COS = new Float64Array(M), SIN = new Float64Array(M);
+for (let i = 0; i < M; i++) { COS[i] = Math.cos(TAU * i / M); SIN[i] = Math.sin(TAU * i / M); }
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const len = a => Math.hypot(a[0], a[1], a[2]);
+const scl = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+function analyse(pts) {
+  const c0 = [0, 0, 0];
+  for (const p of pts) { c0[0] += p[0] / M; c0[1] += p[1] / M; c0[2] += p[2] / M; }
+  const circles = [];
+  for (let k = 1; k <= KMAX; k++) {
+    const re = [0, 0, 0], im = [0, 0, 0];
+    for (let n = 0; n < M; n++) {
+      const j = (k * n) % M, c = COS[j], s = SIN[j], p = pts[n];
+      re[0] += p[0] * c; re[1] += p[1] * c; re[2] += p[2] * c;
+      im[0] -= p[0] * s; im[1] -= p[1] * s; im[2] -= p[2] * s;
+    }
+    const A = scl(re, 2 / M), B = scl(im, -2 / M);   // 2 Re(c_k e^{ikt}) = A cos kt + B sin kt
+    const la = len(A), lb = len(B);
+    if (la + lb < 1e-9) continue;
+    const u = la > 1e-9 ? scl(A, 1 / la) : scl(B, 1 / lb);
+    let w = sub(B, scl(u, dot(B, u))), v;
+    if (len(w) > 1e-9) v = scl(w, 1 / len(w));
+    else { const t = Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]; const c = cross(u, t); v = scl(c, 1 / len(c)); }
+    const ar = dot(A, u), ai = dot(A, v), br = dot(B, u), bi = dot(B, v);
+    // α cosθ + β sinθ = ((α − iβ)/2) e^{iθ} + ((α + iβ)/2) e^{−iθ}
+    const p1 = [(ar + bi) / 2, (ai - br) / 2], p2 = [(ar - bi) / 2, (ai + br) / 2];
+    for (const [z, w0] of [[p1, k], [p2, -k]]) {
+      const r = Math.hypot(z[0], z[1]);
+      if (r > 1e-7) circles.push({ r, phi: Math.atan2(z[1], z[0]), w: w0, u, v });
+    }
+  }
+  circles.sort((a, b) => b.r - a.r);
+  return { c0, circles };
+}
+
+function evalCurve(F, N, out) {
+  // 원 N 개의 합을 APPROX 개 점에서 계산
+  const cs = F.circles.slice(0, N);
+  for (let i = 0; i < APPROX; i++) {
+    const th = TAU * i / APPROX;
+    let x = F.c0[0], y = F.c0[1], z = F.c0[2];
+    for (const c of cs) {
+      const a = c.w * th + c.phi, ca = c.r * Math.cos(a), sa = c.r * Math.sin(a);
+      x += c.u[0] * ca + c.v[0] * sa; y += c.u[1] * ca + c.v[1] * sa; z += c.u[2] * ca + c.v[2] * sa;
+    }
+    out[3 * i] = x; out[3 * i + 1] = y; out[3 * i + 2] = z;
+  }
+  return out;
+}
+
+function errorPct(F, approx, target) {
+  let e = 0, r = 0;
+  for (let i = 0; i < M; i++) {
+    const s = i * APPROX / M, j = Math.floor(s) % APPROX, f = s - Math.floor(s), j2 = (j + 1) % APPROX;
+    const p = target[i];
+    for (let d = 0; d < 3; d++) {
+      const a = approx[3 * j + d] * (1 - f) + approx[3 * j2 + d] * f;
+      e += (a - p[d]) ** 2; r += (p[d] - F.c0[d]) ** 2;
+    }
+  }
+  return 100 * Math.sqrt(e / r);
+}
+
+/* ───────────────────────── 3. 장면 ───────────────────────── */
+const canvas = document.getElementById("c");
+const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true, antialias: true });
+engine.setHardwareScalingLevel(1 / Math.min(2, window.devicePixelRatio || 1));
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = new BABYLON.Color4(0.02, 0.025, 0.06, 1);
+const camera = new BABYLON.ArcRotateCamera("cam", -Math.PI / 2 + 0.22, Math.PI / 2.3, 26, BABYLON.Vector3.Zero(), scene);
+camera.attachControl(canvas, true);
+camera.lowerRadiusLimit = 8; camera.upperRadiusLimit = 120; camera.wheelDeltaPercentage = 0.01; camera.minZ = 0.1;
+camera.useAutoRotationBehavior = true;
+camera.autoRotationBehavior.idleRotationSpeed = 0.07;
+camera.autoRotationBehavior.idleRotationWaitTime = 2500;
+new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0.3, 1, -0.2), scene).intensity = 0.9;
+const glow = new BABYLON.GlowLayer("glow", scene, { mainTextureSamples: 4, blurKernelSize: 48 });
+glow.intensity = 0.85;
+
+const C3 = (h) => BABYLON.Color3.FromHSV(h, 0.75, 1);
+function emissiveMat(name, color, alpha = 1) {
+  const m = new BABYLON.StandardMaterial(name, scene);
+  m.disableLighting = true; m.emissiveColor = color; m.alpha = alpha;
+  return m;
+}
+
+// 별 하늘 + 바닥 동심원
+{
+  const star = BABYLON.MeshBuilder.CreateSphere("star", { diameter: 1, segments: 3 }, scene);
+  star.material = emissiveMat("starM", new BABYLON.Color3(0.75, 0.8, 1));
+  const n = 1400, buf = new Float32Array(16 * n);
+  for (let i = 0; i < n; i++) {
+    const u = Math.random() * 2 - 1, a = Math.random() * TAU, R = 260 + Math.random() * 200, s = 0.25 + Math.random() * 0.9;
+    const x = R * Math.sqrt(1 - u * u) * Math.cos(a), y = R * u, z = R * Math.sqrt(1 - u * u) * Math.sin(a);
+    buf.set([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, x, y, z, 1], 16 * i);
+  }
+  star.thinInstanceSetBuffer("matrix", buf, 16, true);
+  glow.addExcludedMesh(star);
+  const rings = [];
+  for (let r = 4; r <= 28; r += 4) {
+    const pts = [];
+    for (let i = 0; i <= 96; i++) pts.push(new BABYLON.Vector3(r * Math.cos(TAU * i / 96), -17, r * Math.sin(TAU * i / 96)));
+    rings.push(pts);
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = TAU * i / 12;
+    rings.push([new BABYLON.Vector3(4 * Math.cos(a), -17, 4 * Math.sin(a)), new BABYLON.Vector3(28 * Math.cos(a), -17, 28 * Math.sin(a))]);
+  }
+  const floor = BABYLON.MeshBuilder.CreateLineSystem("floor", { lines: rings }, scene);
+  floor.color = new BABYLON.Color3(0.22, 0.27, 0.5); floor.alpha = 0.22;
+  glow.addExcludedMesh(floor);
+}
+
+// 펜 끝
+const tip = BABYLON.MeshBuilder.CreateSphere("tip", { diameter: 0.55, segments: 16 }, scene);
+tip.material = emissiveMat("tipM", new BABYLON.Color3(1, 0.85, 0.35));
+
+// 이음새 구 (thin instance)
+const joint = BABYLON.MeshBuilder.CreateSphere("joint", { diameter: 1, segments: 12 }, scene);
+joint.material = emissiveMat("jointM", new BABYLON.Color3(0.75, 0.95, 1));
+joint.material.disableLighting = false;
+joint.material.diffuseColor = new BABYLON.Color3(0.6, 0.85, 1);
+joint.material.emissiveColor = new BABYLON.Color3(0.25, 0.45, 0.6);
+
+// 궤도 구 (큰 원 몇 개)
+const shells = [];
+for (let i = 0; i < SHELLS; i++) {
+  const s = BABYLON.MeshBuilder.CreateSphere("shell" + i, { diameter: 2, segments: 32 }, scene);
+  const m = new BABYLON.StandardMaterial("shellM" + i, scene);
+  const col = C3((200 + i * 23) % 360);
+  m.disableLighting = true; m.emissiveColor = col.scale(0.7); m.alpha = 0.05; m.backFaceCulling = false;
+  m.needDepthPrePass = false; m.separateCullingPass = true;
+  s.material = m; s.isPickable = false;
+  glow.addExcludedMesh(s);
+  shells.push(s);
+}
+
+/* ── 동적 메시 (N 이 바뀌면 다시 만든다) ── */
+let F = null, target = null, N = 1, nMax = 1;
+let approxNow = new Float32Array(3 * APPROX), approxFrom = new Float32Array(3 * APPROX), approxTo = new Float32Array(3 * APPROX);
+let morph = 1;     // 0 → 1 : 근사 곡선 모양 바꾸기
+let ringsMesh = null, armsMesh = null, approxMesh = null, traceMesh = null, targetMesh = null;
+let jointBuf = null, ringPos = null, armPos = null, approxPos = null, tracePos = null;
+const TRACE_N = Math.floor(APPROX * TRACE_FRAC);
+
+function dispose(m) { if (m) m.dispose(); }
+
+function buildTargetMesh() {
+  dispose(targetMesh);
+  const pts = target.map(p => new BABYLON.Vector3(p[0], p[1], p[2]));
+  pts.push(pts[0].clone());
+  targetMesh = BABYLON.MeshBuilder.CreateLines("target", { points: pts }, scene);
+  targetMesh.color = new BABYLON.Color3(0.75, 0.78, 0.9); targetMesh.alpha = 0.35;
+  glow.addExcludedMesh(targetMesh);
+  targetMesh.isVisible = document.getElementById("cTarget").checked;
+}
+
+function buildDynamic() {
+  dispose(ringsMesh); dispose(armsMesh);
+  const nr = Math.min(N, RING_SHOW);
+  // 원
+  const lines = [], colors = [];
+  for (let i = 0; i < nr; i++) {
+    const L = [], C = [];
+    const c = C3((195 + 330 * Math.log(1 + Math.abs(F.circles[i].w)) / Math.log(1 + KMAX)) % 360);
+    const a = Math.max(0.18, 0.85 - i * 0.004);
+    for (let j = 0; j <= RING_SEG; j++) { L.push(BABYLON.Vector3.Zero()); C.push(new BABYLON.Color4(c.r, c.g, c.b, a)); }
+    lines.push(L); colors.push(C);
+  }
+  if (nr > 0) {
+    ringsMesh = BABYLON.MeshBuilder.CreateLineSystem("rings", { lines, colors, useVertexAlpha: true, updatable: true }, scene);
+    ringPos = new Float32Array(nr * (RING_SEG + 1) * 3);
+    ringsMesh.isVisible = document.getElementById("cRings").checked;
+    ringsMesh.alwaysSelectAsActiveMesh = true;
+  }
+  // 팔 (원의 중심을 잇는 꺾은선)
+  const arm = [], armC = [];
+  for (let i = 0; i <= N; i++) { arm.push(BABYLON.Vector3.Zero()); armC.push(new BABYLON.Color4(1, 1, 1, i < 40 ? 0.85 : 0.5)); }
+  armsMesh = BABYLON.MeshBuilder.CreateLines("arms", { points: arm, colors: armC, useVertexAlpha: true, updatable: true }, scene);
+  armsMesh.alwaysSelectAsActiveMesh = true;
+  armPos = new Float32Array((N + 1) * 3);
+  glow.addExcludedMesh(armsMesh);
+  // 이음새 구
+  const nj = Math.min(N, RING_SHOW) + 1;
+  jointBuf = new Float32Array(16 * nj);
+  joint.thinInstanceSetBuffer("matrix", jointBuf, 16, false);
+  joint.alwaysSelectAsActiveMesh = true;
+}
+
+function buildCurves() {
+  if (!approxMesh) {
+    const pts = [], cols = [];
+    for (let i = 0; i <= APPROX; i++) { pts.push(BABYLON.Vector3.Zero()); cols.push(new BABYLON.Color4(0.45, 0.85, 1, 0.42)); }
+    approxMesh = BABYLON.MeshBuilder.CreateLines("approx", { points: pts, colors: cols, useVertexAlpha: true, updatable: true }, scene);
+    approxMesh.alwaysSelectAsActiveMesh = true;
+    approxPos = new Float32Array((APPROX + 1) * 3);
+    glow.addExcludedMesh(approxMesh);
+    const tp = [], tc = [];
+    for (let i = 0; i <= TRACE_N; i++) {
+      const f = i / TRACE_N;
+      tp.push(BABYLON.Vector3.Zero());
+      tc.push(new BABYLON.Color4(1, 0.55 + 0.4 * f, 0.25 + 0.35 * f, Math.pow(f, 1.6)));
+    }
+    traceMesh = BABYLON.MeshBuilder.CreateLines("trace", { points: tp, colors: tc, useVertexAlpha: true, updatable: true }, scene);
+    traceMesh.alwaysSelectAsActiveMesh = true;
+    tracePos = new Float32Array((TRACE_N + 1) * 3);
+  }
+}
+
+/* ───────────────────────── 4. 상태 바꾸기 ───────────────────────── */
+const ui = id => document.getElementById(id);
+function setN(n, animate) {
+  N = Math.max(1, Math.min(nMax, n | 0));
+  ui("nslider").value = N; ui("nval").textContent = N;
+  let k = 0; for (let i = 0; i < N; i++) k = Math.max(k, Math.abs(F.circles[i].w));
+  ui("kval").textContent = k;
+  approxFrom.set(approxNow);
+  evalCurve(F, N, approxTo);
+  morph = animate ? 0 : 1;
+  if (!animate) approxNow.set(approxTo);
+  ui("err").textContent = errorPct(F, approxTo, target).toFixed(errorPct(F, approxTo, target) < 1 ? 2 : 1) + "%";
+  buildDynamic();
+  drawSpectrum();
+}
+
+function loadShape() {
+  const shape = ui("shape").value;
+  ui("textRow").style.display = shape === "text" ? "flex" : "none";
+  ui("upRow").style.display = shape === "image" ? "flex" : "none";
+  ui("invRow").style.display = shape === "image" ? "flex" : "none";
+  ui("wrapRow").style.display = ["text", "person", "image"].includes(shape) ? "flex" : "none";
+  const t = targetFor(shape, ui("wrap").value);
+  if (!t) { ui("mode").textContent = shape === "image" ? "이미지를 올려 주세요" : "윤곽선을 찾지 못했다"; return; }
+  target = t;
+  F = analyse(target);
+  nMax = Math.min(F.circles.length, 2 * KMAX);
+  ui("nslider").max = nMax;
+  buildTargetMesh(); buildCurves();
+  approxNow.fill(0);
+  setN(Math.min(nMax, N), false);
+  ui("mode").textContent = "";
+}
+
+function drawSpectrum() {
+  const cv = ui("specCanvas"), g = cv.getContext("2d"), W = cv.width, Hh = cv.height;
+  g.clearRect(0, 0, W, Hh);
+  const n = Math.min(F.circles.length, 200), r0 = F.circles[0].r, rMin = r0 * 1e-4;
+  const bw = W / n;
+  for (let i = 0; i < n; i++) {
+    const r = Math.max(rMin, F.circles[i].r), h = (Math.log(r / rMin) / Math.log(r0 / rMin)) * (Hh - 6);
+    g.fillStyle = i < N ? `hsl(${(195 + 330 * Math.log(1 + Math.abs(F.circles[i].w)) / Math.log(1 + KMAX)) % 360},80%,62%)` : "rgba(150,160,210,0.22)";
+    g.fillRect(i * bw, Hh - h, Math.max(1, bw - 0.6), h);
+  }
+  ui("specN").textContent = N > n ? `처음 ${n}개 표시` : `N = ${N}`;
+}
+
+/* ── 자동으로 늘리기 ── */
+const AUTO_SEQ = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 50, 64, 80, 100, 128, 160, 200, 256, 320, 400, 500, 600];
+let autoOn = false, autoTimer = 0, autoIdx = 0;
+function startAuto() {
+  autoOn = true; autoIdx = 0; autoTimer = 0;
+  ui("auto").textContent = "■ 자동 멈추기";
+  setN(AUTO_SEQ[0], true);
+}
+function stopAuto() { autoOn = false; ui("auto").textContent = "▶ 자동으로 늘리기"; }
+
+/* ───────────────────────── 5. 매 프레임 ───────────────────────── */
+let time = Number(Q.get("t") || 0), paused = false;
+const TMP = BABYLON.Matrix.Identity();
+function frame(dt) {
+  if (!F) return;
+  const period = Number(ui("speed").value);
+  if (!paused && !Q.has("freeze")) time = (time + dt / period) % 1;
+  if (autoOn) {
+    autoTimer += dt;
+    const hold = autoIdx < 8 ? 1.7 : 1.3;
+    if (autoTimer > hold) {
+      autoTimer = 0; autoIdx++;
+      while (autoIdx < AUTO_SEQ.length && AUTO_SEQ[autoIdx] > nMax) autoIdx = AUTO_SEQ.length;
+      if (autoIdx >= AUTO_SEQ.length) {
+        setN(nMax, true); stopAuto();
+        if (recStopAfterAuto) { recStopAfterAuto = false; setTimeout(stopRec, 3500); }
+      }
+      else setN(AUTO_SEQ[autoIdx], true);
+    }
+  }
+  // 근사 곡선 모양 바꾸기
+  if (morph < 1) {
+    morph = Math.min(1, morph + dt / 0.55);
+    const e = morph * morph * (3 - 2 * morph);
+    for (let i = 0; i < approxNow.length; i++) approxNow[i] = approxFrom[i] + (approxTo[i] - approxFrom[i]) * e;
+  }
+  approxPos.set(approxNow); approxPos.set(approxNow.subarray(0, 3), 3 * APPROX);
+  approxMesh.updateVerticesData(BABYLON.VertexBuffer.PositionKind, approxPos);
+  approxMesh.isVisible = ui("cApprox").checked;
+
+  // 원 사슬
+  const th = TAU * time, nr = Math.min(N, RING_SHOW);
+  let x = F.c0[0], y = F.c0[1], z = F.c0[2];
+  const jb = jointBuf;
+  armPos[0] = x; armPos[1] = y; armPos[2] = z;
+  for (let i = 0; i < N; i++) {
+    const c = F.circles[i];
+    if (i < nr) {
+      if (ringsMesh) {
+        const base = i * (RING_SEG + 1) * 3;
+        for (let j = 0; j <= RING_SEG; j++) {
+          const a = TAU * j / RING_SEG, ca = c.r * Math.cos(a), sa = c.r * Math.sin(a);
+          ringPos[base + 3 * j] = x + c.u[0] * ca + c.v[0] * sa;
+          ringPos[base + 3 * j + 1] = y + c.u[1] * ca + c.v[1] * sa;
+          ringPos[base + 3 * j + 2] = z + c.u[2] * ca + c.v[2] * sa;
+        }
+      }
+      const s = Math.min(0.42, Math.max(0.07, c.r * 0.09));
+      jb.set([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, x, y, z, 1], 16 * i);
+      if (i < SHELLS) {
+        shells[i].position.set(x, y, z); shells[i].scaling.setAll(c.r);
+        shells[i].isVisible = ui("cShells").checked;
+      }
+    }
+    const a = c.w * th + c.phi, ca = c.r * Math.cos(a), sa = c.r * Math.sin(a);
+    x += c.u[0] * ca + c.v[0] * sa; y += c.u[1] * ca + c.v[1] * sa; z += c.u[2] * ca + c.v[2] * sa;
+    armPos[3 * i + 3] = x; armPos[3 * i + 4] = y; armPos[3 * i + 5] = z;
+  }
+  for (let i = N; i < SHELLS; i++) shells[i].isVisible = false;
+  jb.set([0.12, 0, 0, 0, 0, 0.12, 0, 0, 0, 0, 0.12, 0, x, y, z, 1], 16 * nr);
+  joint.thinInstanceBufferUpdated("matrix");
+  joint.isVisible = ui("cRings").checked;
+  if (ringsMesh) { ringsMesh.updateVerticesData(BABYLON.VertexBuffer.PositionKind, ringPos); ringsMesh.isVisible = ui("cRings").checked; }
+  armsMesh.updateVerticesData(BABYLON.VertexBuffer.PositionKind, armPos);
+  armsMesh.isVisible = ui("cRings").checked;
+  tip.position.set(x, y, z);
+
+  // 자취: 근사 곡선의 지난 TRACE_FRAC 바퀴 + 지금 점
+  const now = time * APPROX, i1 = Math.floor(now);
+  for (let k = 0; k < TRACE_N; k++) {
+    const idx = ((i1 - TRACE_N + 1 + k) % APPROX + APPROX) % APPROX;
+    tracePos[3 * k] = approxNow[3 * idx]; tracePos[3 * k + 1] = approxNow[3 * idx + 1]; tracePos[3 * k + 2] = approxNow[3 * idx + 2];
+  }
+  tracePos[3 * TRACE_N] = x; tracePos[3 * TRACE_N + 1] = y; tracePos[3 * TRACE_N + 2] = z;
+  traceMesh.updateVerticesData(BABYLON.VertexBuffer.PositionKind, tracePos);
+}
+
+/* ───────────────────────── 5½. 화면 녹화 ─────────────────────────
+   WebGL 캔버스를 2D 캔버스에 매 프레임 옮겨 그리고(정보 글씨 포함) captureStream → MediaRecorder */
+let rec = null, recChunks = [], recStart = 0, recCanvas = null, recCtx = null, recMime = "";
+let recStopAfterAuto = false, savedScale = null;
+const SHAPE_NAME = () => {
+  const o = ui("shape").selectedOptions[0].textContent;
+  return ui("shape").value === "text" ? `${o} “${ui("textIn").value}”` : o;
+};
+function pickMime() {
+  const list = ["video/mp4;codecs=avc1.640034", "video/mp4;codecs=avc1", "video/mp4",
+                "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  for (const m of list) if (MediaRecorder.isTypeSupported(m)) return m;
+  return "";
+}
+function startRec() {
+  if (rec) return;
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+    alert("이 브라우저는 화면 녹화를 지원하지 않습니다. 최신 Chrome·Edge를 쓰세요."); return;
+  }
+  const res = ui("recRes").value;
+  savedScale = engine.getHardwareScalingLevel();
+  if (res !== "screen") {
+    const w = res === "4k" ? 3840 : 1920;
+    engine.setHardwareScalingLevel(canvas.clientWidth / w);
+    engine.resize();
+  }
+  recCanvas = document.createElement("canvas");
+  recCanvas.width = engine.getRenderWidth() & ~1;
+  recCanvas.height = engine.getRenderHeight() & ~1;
+  recCtx = recCanvas.getContext("2d");
+  recMime = pickMime();
+  const bps = res === "4k" ? 45e6 : res === "1080" ? 16e6 : 12e6;
+  rec = new MediaRecorder(recCanvas.captureStream(60), recMime ? { mimeType: recMime, videoBitsPerSecond: bps } : { videoBitsPerSecond: bps });
+  recChunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  rec.onstop = () => {
+    const type = (recMime || "video/webm").split(";")[0];
+    const blob = new Blob(recChunks, { type });
+    console.log("rec bytes", blob.size, type, recCanvas.width + "x" + recCanvas.height);
+    if (!Q.has("rectest")) {
+      const d = new Date(), p = n => String(n).padStart(2, "0");
+      const name = `fourier-3d-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${type.includes("mp4") ? "mp4" : "webm"}`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }
+    rec = null; recCanvas = null; recCtx = null;
+    engine.setHardwareScalingLevel(savedScale); engine.resize();
+    ui("rec").classList.remove("on"); ui("rec").textContent = "● 녹화";
+    ui("recAuto").disabled = false;
+  };
+  rec.start(500);
+  recStart = performance.now();
+  ui("rec").classList.add("on");
+  ui("recAuto").disabled = true;
+}
+function stopRec() { if (rec && rec.state !== "inactive") rec.stop(); }
+
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+function drawRecFrame() {
+  if (!recCtx) return;
+  const W = recCanvas.width, H = recCanvas.height;
+  recCtx.fillStyle = "#05060f"; recCtx.fillRect(0, 0, W, H);   // WebGL 의 반투명 픽셀이 하얗게 뜨지 않게
+  recCtx.drawImage(canvas, 0, 0, W, H);
+  const sec = (performance.now() - recStart) / 1000;
+  ui("rec").textContent = `■ 정지 ${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+  if (!ui("cRecHud").checked) return;
+  const k = H / 1080, g = recCtx, font = '"Pretendard", "Malgun Gothic", sans-serif';
+  // 왼쪽 위 제목
+  g.font = `700 ${34 * k}px ${font}`; g.textBaseline = "top";
+  g.fillStyle = "#e9ecff"; g.fillText("3D 푸리에 에피사이클", 40 * k, 36 * k);
+  const tw = g.measureText("3D 푸리에 에피사이클").width;
+  g.font = `500 ${24 * k}px ${font}`; g.fillStyle = "#9aa3c7";
+  g.fillText(SHAPE_NAME(), 40 * k + tw + 18 * k, 44 * k);
+  // 왼쪽 아래 수치
+  const items = [["원의 개수 N", ui("nval").textContent, "#ffc94a"], ["최고 주파수 |k|", ui("kval").textContent, "#e9ecff"],
+                 ["오차", ui("err").textContent, "#5ee7ff"]];
+  g.font = `600 ${30 * k}px ${font}`;
+  let x = 40 * k, widths = items.map(([a, b]) => {
+    g.font = `500 ${22 * k}px ${font}`; const wa = g.measureText(a + "  ").width;
+    g.font = `700 ${34 * k}px ${font}`; return wa + g.measureText(b).width;
+  });
+  const boxW = widths.reduce((s, w) => s + w, 0) + 40 * k * (items.length - 1) + 72 * k, boxH = 72 * k, y = H - boxH - 36 * k;
+  roundRect(g, 24 * k, y, boxW, boxH, 16 * k);
+  g.fillStyle = "rgba(14,18,40,0.72)"; g.fill();
+  g.strokeStyle = "rgba(160,180,255,0.25)"; g.lineWidth = 1.5 * k; g.stroke();
+  g.textBaseline = "middle";
+  items.forEach(([a, b, c], i) => {
+    g.font = `500 ${22 * k}px ${font}`; g.fillStyle = "#9aa3c7"; g.fillText(a, x + 24 * k - 0 * k + (i ? 0 : 0), y + boxH / 2);
+    const wa = g.measureText(a + "  ").width;
+    g.font = `700 ${34 * k}px ${font}`; g.fillStyle = c; g.fillText(b, x + 24 * k + wa, y + boxH / 2);
+    x += widths[i] + 40 * k;
+  });
+}
+
+/* ───────────────────────── 6. 조작 ───────────────────────── */
+ui("shape").onchange = () => { stopAuto(); loadShape(); };
+ui("wrap").onchange = () => { stopAuto(); loadShape(); };
+ui("textIn").oninput = () => { clearTimeout(window._tt); window._tt = setTimeout(loadShape, 350); };
+ui("cInvert").onchange = loadShape;
+ui("fileIn").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const im = new Image();
+  im.onload = () => { uploadedImage = im; loadShape(); };
+  im.src = URL.createObjectURL(f);
+};
+ui("nslider").oninput = e => { stopAuto(); setN(Number(e.target.value), true); };
+ui("auto").onclick = () => autoOn ? stopAuto() : startAuto();
+ui("pause").onclick = () => { paused = !paused; ui("pause").textContent = paused ? "▶ 재생" : "⏸ 멈춤"; };
+ui("rec").onclick = () => rec ? stopRec() : startRec();
+ui("recAuto").onclick = () => {
+  if (rec) return;
+  stopAuto(); ui("cRotate").checked = true; camera.useAutoRotationBehavior = true;
+  startRec(); recStopAfterAuto = true; startAuto();
+};
+ui("cTarget").onchange = e => { if (targetMesh) targetMesh.isVisible = e.target.checked; };
+ui("cRotate").onchange = e => { camera.useAutoRotationBehavior = e.target.checked; };
+window.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type === "text") return;
+  if (e.key === "ArrowRight") { stopAuto(); setN(N + 1, true); }
+  if (e.key === "ArrowLeft") { stopAuto(); setN(N - 1, true); }
+  if (e.key === " ") { e.preventDefault(); ui("pause").click(); }
+  if (e.key === "r" || e.key === "R") ui("rec").click();
+});
+
+/* ───────────────────────── 7. 시작 ───────────────────────── */
+if (Q.get("shape")) ui("shape").value = Q.get("shape");
+if (Q.get("text")) ui("textIn").value = Q.get("text");
+if (Q.get("wrap")) ui("wrap").value = Q.get("wrap");
+if (Q.has("norotate")) { ui("cRotate").checked = false; camera.useAutoRotationBehavior = false; }
+N = Number(Q.get("N") || 1);
+loadShape();
+if (!Q.has("N") && !Q.has("noauto")) startAuto();
+ui("loading").remove();
+let last = performance.now();
+engine.runRenderLoop(() => {
+  const nowT = performance.now(), dt = Math.min(0.05, (nowT - last) / 1000); last = nowT;
+  frame(Q.has("freeze") ? 0 : dt);
+  scene.render();
+  if (rec) drawRecFrame();
+});
+window.addEventListener("resize", () => engine.resize());
+console.log("ready circles", F && F.circles.length);
+if (Q.has("rectest")) { startRec(); setTimeout(stopRec, Number(Q.get("rectest")) || 2500); }
+</script>
+</body>
+</html>
