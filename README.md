@@ -3,6 +3,8 @@
 회전하는 원 수백 개의 벡터 합으로 3차원 폐곡선, 글자, 인물 윤곽선을 그리는 Babylon.js 시각화입니다.
 원(주파수 성분)의 개수 N이 늘어날수록 모양이 정교해지는 과정을 보여 줍니다.
 
+라이브: https://infgrp.github.io/fourier-epicycles-3d/
+
 `index.html` 하나로 동작합니다. 백엔드는 없고, Babylon.js를 CDN에서 불러오므로 인터넷 연결이 필요합니다.
 
 ## 원리
